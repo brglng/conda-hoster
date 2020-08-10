@@ -1,3 +1,3 @@
-# conda-server
+# conda-hoster
 
-A simple server for serving conda channels.
+A simple self-hosting conda channel service.
