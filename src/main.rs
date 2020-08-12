@@ -10,7 +10,7 @@ use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
 use serde_derive::Deserialize;
 
-static DEFAULT_CONFIG: &str = 
+static DEFAULT_CONFIG: &str =
 r#"bind = "0.0.0.0:8088"
 root = "/var/www/conda"
 "#;
