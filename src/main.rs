@@ -65,7 +65,9 @@ async fn upload(config: web::Data<Config>, info: web::Path<(String,)>, mut paylo
     let dirpath = format!("{}/{}", &config.root, channel);
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
+
         let mut filepath = PathBuf::from(&dirpath);
+        filepath.push(content_disposition.get_filename().unwrap().split("/").last().unwrap());
 
         // if already exists, return 409
         if filepath.exists() {
@@ -74,7 +76,6 @@ async fn upload(config: web::Data<Config>, info: web::Path<(String,)>, mut paylo
 
         fs::create_dir_all(&dirpath)?;
 
-        filepath.push(content_disposition.get_filename().unwrap().split("/").last().unwrap());
         let mut f = web::block(|| std::fs::File::create(filepath)).await.unwrap();
         while let Some(chunk) = field.next().await {
             let data = chunk.unwrap();
