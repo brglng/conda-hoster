@@ -10,11 +10,6 @@ use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
 use serde_derive::Deserialize;
 
-static DEFAULT_CONFIG: &str =
-r#"bind = "0.0.0.0:8088"
-root = "/var/www/conda"
-"#;
-
 #[derive(Clone, Deserialize)]
 struct Config {
     bind: String,
@@ -35,7 +30,7 @@ async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     for entry in PathBuf::from(&config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
-                html.push_str(&format!("<p><a href=\"{0:?}\">{0:?}</a></p>", entry.file_name()));
+                html.push_str(&format!("<p><a href=\"{0}\">{0}/</a></p>", entry.path().to_str().unwrap()));
             }
         });
     }
@@ -124,7 +119,10 @@ async fn main() -> io::Result<()> {
     let config_path = config_path_opt.unwrap_or(config_dirs[0].join("config.toml"));
     if !config_path.exists() {
         fs::create_dir_all(&config_dirs[0])?;
-        fs::write(&config_path, DEFAULT_CONFIG)?;
+        fs::write(&config_path, format!(
+r#"bind = "0.0.0.0:8088"
+root = "{}/conda-hoster/web-root"
+"#, dirs::data_dir().unwrap().to_str().unwrap()))?;
     }
 
     let config: Config;
@@ -138,12 +136,12 @@ async fn main() -> io::Result<()> {
                     config = config_obj;
                 },
                 Err(e) => {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, format!("failed to parse {}: {}", config_path.display(), e)));
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, format!("failed to parse {}: {}", config_path.to_str().unwrap(), e)));
                 }
             }
         },
         Err(e) => {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("configuration file {} is not correctly UTF-8 encoded: {}", config_path.display(), e)));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("configuration file {} is not correctly UTF-8 encoded: {}", config_path.to_str().unwrap(), e)));
         }
     }
 

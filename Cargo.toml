@@ -1,5 +1,5 @@
 [package]
-name = "conda-server"
+name = "conda-hoster"
 version = "0.1.0"
 authors = ["Zhaosheng Pan <zhaosheng.pan@ximalaya.com>"]
 edition = "2018"
