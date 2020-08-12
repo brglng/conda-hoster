@@ -30,7 +30,7 @@ async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     for entry in PathBuf::from(&config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
-                html.push_str(&format!("<p><a href=\"{0}\">{0}/</a></p>", entry.file_name().to_str().unwrap()));
+                html.push_str(&format!("<p><a href=\"{0}/\">{0}</a></p>", entry.file_name().to_str().unwrap()));
             }
         });
     }
@@ -60,9 +60,10 @@ async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFil
     }
 }
 
-async fn upload(config: web::Data<Config>, info: web::Path<(String,)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
+async fn upload(config: web::Data<Config>, info: web::Path<(String,String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
     let channel = &info.0;
-    let dirpath = format!("{}/{}", &config.root, channel);
+    let arch = &info.1;
+    let dirpath = format!("{}/{}/{}", &config.root, channel, arch);
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
 
@@ -157,7 +158,7 @@ root = "{}/conda-hoster/web-root"
                 web::resource("/")
                     .route(web::get().to(index)))
             .service(
-                web::resource("/{channel}/")
+                web::resource("/{channel}/{arch}")
                     .route(web::post().to(upload))
                     .route(web::get().to(channel_index)))
             .service(
