@@ -30,7 +30,7 @@ async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     for entry in PathBuf::from(&config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
-                html.push_str(&format!("<p><a href=\"{0}\">{0}/</a></p>", entry.path().to_str().unwrap()));
+                html.push_str(&format!("<p><a href=\"{0}\">{0}/</a></p>", entry.file_name().to_str().unwrap()));
             }
         });
     }
