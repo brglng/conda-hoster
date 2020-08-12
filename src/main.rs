@@ -21,10 +21,26 @@ struct Config {
     root: String,
 }
 
-async fn index(config: web::Data<Config>) -> Result<NamedFile, Error> {
-    let mut filepath = PathBuf::from(&config.root);
-    filepath.push("index.html");
-    Ok(NamedFile::open(filepath)?)
+async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
+    let mut html = String::from(r#"
+        <!DOCTYPE html>
+        <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Conda Hoster</title>
+            </head>
+            <body>
+                <p>Available Channels:</p>
+    "#);
+    for entry in PathBuf::from(&config.root).read_dir()? {
+        let _ = entry.map(|entry| {
+            if entry.path().is_dir() {
+                html.push_str(&format!("<p><a href=\"{0:?}\">{0:?}</a></p>", entry.file_name()));
+            }
+        });
+    }
+    html.push_str("</body>\n</html>\n");
+    return Ok(HttpResponse::Ok().header("Content-Type", "text/html; charset=utf-8").body(html));
 }
 
 async fn channel_index(config: web::Data<Config>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
@@ -130,6 +146,8 @@ async fn main() -> io::Result<()> {
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("configuration file {} is not correctly UTF-8 encoded: {}", config_path.display(), e)));
         }
     }
+
+    fs::create_dir_all(&config.root)?;
 
     let config_clone = config.clone();
     HttpServer::new(move || {
