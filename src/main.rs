@@ -158,7 +158,7 @@ root = "{}/conda-hoster/web-root"
                 web::resource("/")
                     .route(web::get().to(index)))
             .service(
-                web::resource("/{channel}/{arch}")
+                web::resource("/{channel}/{arch}/")
                     .route(web::post().to(upload))
                     .route(web::get().to(channel_index)))
             .service(
