@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -7,29 +8,37 @@ use actix_multipart::Multipart;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
+use serde_derive::Deserialize;
 
+static DEFAULT_CONFIG: &str = 
+r#"bind = "0.0.0.0:8088"
+root = "/var/www/conda"
+"#;
 
-static WEB_ROOT: &str = "conda/";
+#[derive(Clone, Deserialize)]
+struct Config {
+    bind: String,
+    root: String,
+}
 
-
-async fn index() -> Result<NamedFile, Error> {
-    let mut filepath = PathBuf::from(WEB_ROOT);
+async fn index(config: web::Data<Config>) -> Result<NamedFile, Error> {
+    let mut filepath = PathBuf::from(&config.root);
     filepath.push("index.html");
     Ok(NamedFile::open(filepath)?)
 }
 
-async fn channel_index(info: web::Path<(String,)>) -> Result<NamedFile, Error> {
+async fn channel_index(config: web::Data<Config>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
     let channel = &info.0;
-    let mut filepath = PathBuf::from(WEB_ROOT);
+    let mut filepath = PathBuf::from(&config.root);
     filepath.push(channel);
     filepath.push("index.html");
     Ok(NamedFile::open(filepath)?)
 }
 
-async fn channel(req: HttpRequest) -> Result<NamedFile, Error> {
+async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFile, Error> {
     let channel: PathBuf = req.match_info().query("channel").parse().unwrap();
     let path: PathBuf = req.match_info().query("filename").parse().unwrap();
-    let mut filepath = PathBuf::from(WEB_ROOT);
+    let mut filepath = PathBuf::from(&config.root);
     filepath.push(channel);
     filepath.push(path);
     if filepath.is_dir() {
@@ -40,9 +49,9 @@ async fn channel(req: HttpRequest) -> Result<NamedFile, Error> {
     }
 }
 
-async fn upload(info: web::Path<(String,)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
+async fn upload(config: web::Data<Config>, info: web::Path<(String,)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
     let channel = &info.0;
-    let dirpath = format!("{}/{}", WEB_ROOT, channel);
+    let dirpath = format!("{}/{}", &config.root, channel);
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
         let mut filepath = PathBuf::from(&dirpath);
@@ -79,14 +88,56 @@ async fn upload(info: web::Path<(String,)>, mut payload: Multipart) -> Result<Ht
 }
 
 #[actix_rt::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> io::Result<()> {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
-    HttpServer::new(|| {
+
+    let config_dirs = [
+        dirs::config_dir().unwrap().join("conda-hoster"),
+        PathBuf::from("/etc").join("conda-hoster")
+    ];
+
+    let mut config_path_opt: Option<PathBuf> = None;
+    for config_dir in config_dirs.iter() {
+        let config_path = config_dir.join("config.toml");
+        if config_path.exists() {
+            config_path_opt = Some(config_path);
+            break;
+        }
+    }
+
+    let config_path = config_path_opt.unwrap_or(config_dirs[0].join("config.toml"));
+    if !config_path.exists() {
+        fs::create_dir_all(&config_dirs[0])?;
+        fs::write(&config_path, DEFAULT_CONFIG)?;
+    }
+
+    let config: Config;
+    let config_bytes = fs::read(&config_path)?;
+    let config_string = String::from_utf8(config_bytes);
+    match config_string {
+        Ok(config_string) => {
+            let config_obj = toml::from_str(&config_string);
+            match config_obj {
+                Ok(config_obj) => {
+                    config = config_obj;
+                },
+                Err(e) => {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, format!("failed to parse {}: {}", config_path.display(), e)));
+                }
+            }
+        },
+        Err(e) => {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("configuration file {} is not correctly UTF-8 encoded: {}", config_path.display(), e)));
+        }
+    }
+
+    let config_clone = config.clone();
+    HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
+            .data(config_clone.clone())
             .service(
                 web::resource("/")
-                    .route(web::post().to(upload))
                     .route(web::get().to(index)))
             .service(
                 web::resource("/{channel}/")
@@ -96,7 +147,7 @@ async fn main() -> std::io::Result<()> {
                 web::resource("/{channel}/{filename:.*}")
                     .route(web::get().to(channel)))
     })
-    .bind("127.0.0.1:8088")?
+    .bind(&config.bind)?
     .workers(1)
     .run()
     .await
