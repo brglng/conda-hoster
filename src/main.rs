@@ -141,7 +141,7 @@ async fn main() -> io::Result<()> {
         fs::write(&config_path, format!(
 r#"bind = "0.0.0.0:8088"
 root = "{}/conda-hoster/web-root"
-index-sleep-time = 10
+index_sleep_time = 10
 "#, dirs::data_dir().unwrap().to_str().unwrap()))?;
     }
 
