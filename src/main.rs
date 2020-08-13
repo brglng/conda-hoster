@@ -1,8 +1,12 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time;
+use std::thread;
 use actix_files::NamedFile;
 use actix_multipart::Multipart;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
@@ -14,9 +18,30 @@ use serde_derive::Deserialize;
 struct Config {
     bind: String,
     root: String,
+    index_sleep_time: u64
 }
 
-async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
+struct Globals {
+    config: Config,
+    channel_thread_map: Mutex<HashMap<String, thread::JoinHandle<()>>>
+}
+
+pub fn spawn_indexing_thread(dirpath: &str, index_sleep_time: u64) -> thread::JoinHandle<()> {
+    let dirpath_owned = dirpath.to_owned();
+    thread::spawn(move || {
+        loop {
+            let _ = Command::new("conda")
+                .arg("index")
+                .arg(&dirpath_owned)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn().map(|mut p| { let _ = p.wait(); });
+            thread::sleep(time::Duration::from_secs(index_sleep_time));
+        }
+    })
+}
+
+async fn index(globals: web::Data<Globals>) -> Result<HttpResponse, Error> {
     let mut html = String::from(r#"
         <!DOCTYPE html>
         <html>
@@ -27,7 +52,7 @@ async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
             <body>
                 <p>Available Channels:</p>
     "#);
-    for entry in PathBuf::from(&config.root).read_dir()? {
+    for entry in PathBuf::from(&globals.config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
                 html.push_str(&format!("<p><a href=\"{0}/\">{0}</a></p>", entry.file_name().to_str().unwrap()));
@@ -38,18 +63,18 @@ async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     return Ok(HttpResponse::Ok().header("Content-Type", "text/html; charset=utf-8").body(html));
 }
 
-async fn channel_index(config: web::Data<Config>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
+async fn channel_index(globals: web::Data<Globals>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
     let channel = &info.0;
-    let mut filepath = PathBuf::from(&config.root);
+    let mut filepath = PathBuf::from(&globals.config.root);
     filepath.push(channel);
     filepath.push("index.html");
     Ok(NamedFile::open(filepath)?)
 }
 
-async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFile, Error> {
+async fn channel(globals: web::Data<Globals>, req: HttpRequest) -> Result<NamedFile, Error> {
     let channel: PathBuf = req.match_info().query("channel").parse().unwrap();
     let path: PathBuf = req.match_info().query("filename").parse().unwrap();
-    let mut filepath = PathBuf::from(&config.root);
+    let mut filepath = PathBuf::from(&globals.config.root);
     filepath.push(channel);
     filepath.push(path);
     if filepath.is_dir() {
@@ -60,10 +85,10 @@ async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFil
     }
 }
 
-async fn upload(config: web::Data<Config>, info: web::Path<(String,String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
+async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
     let channel = &info.0;
     let arch = &info.1;
-    let dirpath = format!("{}/{}/{}", &config.root, channel, arch);
+    let dirpath = format!("{}/{}/{}", &globals.config.root, channel, arch);
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
 
@@ -84,18 +109,10 @@ async fn upload(config: web::Data<Config>, info: web::Path<(String,String)>, mut
         }
     }
 
-    // do indexing
-    let mut p = Command::new("conda")
-        .arg("index")
-        .arg(&dirpath)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let index_result = web::block(move || p.wait()).await?;
+    let mut channel_thread_map = globals.channel_thread_map.lock().unwrap();
 
-    if !index_result.success() {
-        return Err(HttpResponse::InternalServerError().into());
-    }
+    channel_thread_map.entry(channel.clone())
+        .or_insert_with(|| spawn_indexing_thread(&dirpath, globals.config.index_sleep_time));
 
     Ok(HttpResponse::Ok().into())
 }
@@ -124,6 +141,7 @@ async fn main() -> io::Result<()> {
         fs::write(&config_path, format!(
 r#"bind = "0.0.0.0:8088"
 root = "{}/conda-hoster/web-root"
+index-sleep-time = 10
 "#, dirs::data_dir().unwrap().to_str().unwrap()))?;
     }
 
@@ -153,7 +171,7 @@ root = "{}/conda-hoster/web-root"
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
-            .data(config_clone.clone())
+            .data(Globals{config: config_clone.clone(), channel_thread_map: Mutex::new(HashMap::new())})
             .service(
                 web::resource("/")
                     .route(web::get().to(index)))
