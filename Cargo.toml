@@ -5,6 +5,7 @@ authors = ["Zhaosheng Pan <zhaosheng.pan@ximalaya.com>"]
 edition = "2018"
 
 [dependencies]
+socket2 = "0.2.4"
 actix-files = "^0.2.2"
 actix-web = "^2.0.0"
 actix-rt = "^1.1.1"
