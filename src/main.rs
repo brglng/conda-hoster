@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::io::Write;
@@ -23,7 +23,8 @@ lazy_static! {
 struct Config {
     bind: String,
     root: String,
-    index_sleep_time: u64
+    index_sleep_time: u64,
+    tokens: HashSet<String>
 }
 
 async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
@@ -70,9 +71,15 @@ async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFil
     }
 }
 
-async fn upload(config: web::Data<Config>, info: web::Path<(String,String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
-    let channel = &info.0;
-    let arch = &info.1;
+async fn upload(config: web::Data<Config>, info: web::Path<(String, String, String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
+    let token = &info.1;
+
+    if config.tokens.get(token).is_none() {
+        return Ok(HttpResponse::Forbidden().into());
+    }
+
+    let channel = &info.1;
+    let arch = &info.2;
     let dirpath = format!("{}/{}/{}", &config.root, channel, arch);
     let mut should_start_indexing = false;
     while let Ok(Some(mut field)) = payload.try_next().await {
@@ -149,6 +156,7 @@ async fn main() -> io::Result<()> {
 r#"bind = "0.0.0.0:8088"
 root = "{}/conda-hoster/web-root"
 index_sleep_time = 10
+tokens = []
 "#, dirs::data_dir().unwrap().to_str().unwrap()))?;
     }
 
@@ -183,8 +191,10 @@ index_sleep_time = 10
                 web::resource("/")
                     .route(web::get().to(index)))
             .service(
-                web::resource("/{channel}/{arch}/")
-                    .route(web::post().to(upload))
+                web::resource("/t/{channel}/{arch}/")
+                    .route(web::post().to(upload)))
+            .service(
+                web::resource("{channel}/{arch}/")
                     .route(web::get().to(channel_index)))
             .service(
                 web::resource("/{channel}/{filename:.*}")
