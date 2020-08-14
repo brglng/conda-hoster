@@ -123,7 +123,7 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
     }
 
     if should_spawn_thread {
-        spawn_indexing_thread(&globals.channel_mutex_map.read().unwrap().get(channel.as_str()).unwrap(), channel.clone(), globals.config.index_sleep_time);
+        spawn_indexing_thread(&globals.channel_mutex_map.read().unwrap().get(channel.as_str()).unwrap(), dirpath, globals.config.index_sleep_time);
     }
 
     Ok(HttpResponse::Ok().into())
