@@ -191,7 +191,7 @@ tokens = []
                 web::resource("/")
                     .route(web::get().to(index)))
             .service(
-                web::resource("/t/{channel}/{arch}/")
+                web::resource("/t/{token}/{channel}/{arch}/")
                     .route(web::post().to(upload)))
             .service(
                 web::resource("{channel}/{arch}/")
