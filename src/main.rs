@@ -14,26 +14,6 @@ use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
 use serde_derive::Deserialize;
 
-pub fn spawn_indexing_thread(mutex: &Mutex<()>, dirpath: String, index_sleep_time: u64) {
-    crossbeam::scope(|scope| {
-        scope.spawn(move || {
-            loop {
-                let _guard = mutex.lock().unwrap();
-                let _ = Command::new("conda")
-                    .arg("index")
-                    .arg(&dirpath)
-                    .stdout(Stdio::inherit())
-                    .stderr(Stdio::inherit())
-                    .spawn()
-                    .map(|mut p| {
-                        let _ = p.wait();
-                    });
-                thread::sleep(time::Duration::from_secs(index_sleep_time));
-            }
-        });
-    });
-}
-
 #[derive(Clone, Deserialize)]
 struct Config {
     bind: String,
@@ -94,7 +74,7 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
     let channel = &info.0;
     let arch = &info.1;
     let dirpath = format!("{}/{}/{}", &globals.config.root, channel, arch);
-    let mut should_spawn_thread = false;
+    let mut should_start_indexing = false;
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
 
@@ -109,7 +89,7 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
         fs::create_dir_all(&dirpath)?;
 
         globals.channel_mutex_map.write().unwrap().entry(channel.clone()).or_insert_with(|| {
-            should_spawn_thread = true;
+            should_start_indexing = true;
             Mutex::new(())
         });
 
@@ -122,8 +102,23 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
         }
     }
 
-    if should_spawn_thread {
-        spawn_indexing_thread(&globals.channel_mutex_map.read().unwrap().get(channel.as_str()).unwrap(), dirpath, globals.config.index_sleep_time);
+    if should_start_indexing {
+        let channel_clone = channel.clone();
+        let _ = web::block::<_, (), ()>(move || {
+            loop {
+                let _guard = globals.channel_mutex_map.read().unwrap().get(&channel_clone).unwrap();
+                let _ = Command::new("conda")
+                    .arg("index")
+                    .arg(&dirpath)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .map(|mut p| {
+                        let _ = p.wait();
+                    });
+                thread::sleep(time::Duration::from_secs(globals.config.index_sleep_time));
+            }
+        });
     }
 
     Ok(HttpResponse::Ok().into())
