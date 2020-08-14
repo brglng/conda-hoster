@@ -4,7 +4,7 @@ use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time;
 use std::thread;
 use actix_files::NamedFile;
@@ -13,6 +13,26 @@ use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServ
 use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
 use serde_derive::Deserialize;
+
+pub fn spawn_indexing_thread(mutex: &Mutex<()>, dirpath: String, index_sleep_time: u64) {
+    crossbeam::scope(|scope| {
+        scope.spawn(move || {
+            loop {
+                let _guard = mutex.lock().unwrap();
+                let _ = Command::new("conda")
+                    .arg("index")
+                    .arg(&dirpath)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .map(|mut p| {
+                        let _ = p.wait();
+                    });
+                thread::sleep(time::Duration::from_secs(index_sleep_time));
+            }
+        });
+    });
+}
 
 #[derive(Clone, Deserialize)]
 struct Config {
@@ -23,22 +43,7 @@ struct Config {
 
 struct Globals {
     config: Config,
-    channel_thread_map: Mutex<HashMap<String, thread::JoinHandle<()>>>
-}
-
-pub fn spawn_indexing_thread(dirpath: &str, index_sleep_time: u64) -> thread::JoinHandle<()> {
-    let dirpath_owned = dirpath.to_owned();
-    thread::spawn(move || {
-        loop {
-            let _ = Command::new("conda")
-                .arg("index")
-                .arg(&dirpath_owned)
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn().map(|mut p| { let _ = p.wait(); });
-            thread::sleep(time::Duration::from_secs(index_sleep_time));
-        }
-    })
+    channel_mutex_map: RwLock<HashMap<String, Mutex<()>>>,
 }
 
 async fn index(globals: web::Data<Globals>) -> Result<HttpResponse, Error> {
@@ -89,6 +94,7 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
     let channel = &info.0;
     let arch = &info.1;
     let dirpath = format!("{}/{}/{}", &globals.config.root, channel, arch);
+    let mut should_spawn_thread = false;
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
 
@@ -102,6 +108,13 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
 
         fs::create_dir_all(&dirpath)?;
 
+        globals.channel_mutex_map.write().unwrap().entry(channel.clone()).or_insert_with(|| {
+            should_spawn_thread = true;
+            Mutex::new(())
+        });
+
+        let _ = globals.channel_mutex_map.read().unwrap().get(channel.as_str()).unwrap().lock();
+
         let mut f = web::block(|| std::fs::File::create(filepath)).await.unwrap();
         while let Some(chunk) = field.next().await {
             let data = chunk.unwrap();
@@ -109,10 +122,9 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
         }
     }
 
-    let mut channel_thread_map = globals.channel_thread_map.lock().unwrap();
-
-    channel_thread_map.entry(channel.clone())
-        .or_insert_with(|| spawn_indexing_thread(&dirpath, globals.config.index_sleep_time));
+    if should_spawn_thread {
+        spawn_indexing_thread(&globals.channel_mutex_map.read().unwrap().get(channel.as_str()).unwrap(), channel.clone(), globals.config.index_sleep_time);
+    }
 
     Ok(HttpResponse::Ok().into())
 }
@@ -171,7 +183,10 @@ index_sleep_time = 10
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
-            .data(Globals{config: config_clone.clone(), channel_thread_map: Mutex::new(HashMap::new())})
+            .data(Globals {
+                config: config_clone.clone(),
+                channel_mutex_map: RwLock::new(HashMap::new())
+            })
             .service(
                 web::resource("/")
                     .route(web::get().to(index)))
