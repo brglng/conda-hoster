@@ -72,7 +72,7 @@ async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFil
 }
 
 async fn upload(config: web::Data<Config>, info: web::Path<(String, String, String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
-    let token = &info.1;
+    let token = &info.0;
 
     if config.tokens.get(token).is_none() {
         return Ok(HttpResponse::Forbidden().into());
