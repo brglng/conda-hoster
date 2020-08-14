@@ -12,7 +12,12 @@ use actix_multipart::Multipart;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
+use lazy_static::lazy_static;
 use serde_derive::Deserialize;
+
+lazy_static! {
+    static ref CHANNEL_MUTEX_MAP: RwLock<HashMap<String, Mutex<()>>> = RwLock::new(HashMap::new());
+}
 
 #[derive(Clone, Deserialize)]
 struct Config {
@@ -21,12 +26,7 @@ struct Config {
     index_sleep_time: u64
 }
 
-struct Globals {
-    config: Config,
-    channel_mutex_map: RwLock<HashMap<String, Mutex<()>>>,
-}
-
-async fn index(globals: web::Data<Globals>) -> Result<HttpResponse, Error> {
+async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     let mut html = String::from(r#"
         <!DOCTYPE html>
         <html>
@@ -37,7 +37,7 @@ async fn index(globals: web::Data<Globals>) -> Result<HttpResponse, Error> {
             <body>
                 <p>Available Channels:</p>
     "#);
-    for entry in PathBuf::from(&globals.config.root).read_dir()? {
+    for entry in PathBuf::from(&config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
                 html.push_str(&format!("<p><a href=\"{0}/\">{0}</a></p>", entry.file_name().to_str().unwrap()));
@@ -48,18 +48,18 @@ async fn index(globals: web::Data<Globals>) -> Result<HttpResponse, Error> {
     return Ok(HttpResponse::Ok().header("Content-Type", "text/html; charset=utf-8").body(html));
 }
 
-async fn channel_index(globals: web::Data<Globals>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
+async fn channel_index(config: web::Data<Config>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
     let channel = &info.0;
-    let mut filepath = PathBuf::from(&globals.config.root);
+    let mut filepath = PathBuf::from(&config.root);
     filepath.push(channel);
     filepath.push("index.html");
     Ok(NamedFile::open(filepath)?)
 }
 
-async fn channel(globals: web::Data<Globals>, req: HttpRequest) -> Result<NamedFile, Error> {
+async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFile, Error> {
     let channel: PathBuf = req.match_info().query("channel").parse().unwrap();
     let path: PathBuf = req.match_info().query("filename").parse().unwrap();
-    let mut filepath = PathBuf::from(&globals.config.root);
+    let mut filepath = PathBuf::from(&config.root);
     filepath.push(channel);
     filepath.push(path);
     if filepath.is_dir() {
@@ -70,10 +70,10 @@ async fn channel(globals: web::Data<Globals>, req: HttpRequest) -> Result<NamedF
     }
 }
 
-async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
+async fn upload(config: web::Data<Config>, info: web::Path<(String,String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
     let channel = &info.0;
     let arch = &info.1;
-    let dirpath = format!("{}/{}/{}", &globals.config.root, channel, arch);
+    let dirpath = format!("{}/{}/{}", &config.root, channel, arch);
     let mut should_start_indexing = false;
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
@@ -88,12 +88,12 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
 
         fs::create_dir_all(&dirpath)?;
 
-        globals.channel_mutex_map.write().unwrap().entry(channel.clone()).or_insert_with(|| {
+        CHANNEL_MUTEX_MAP.write().unwrap().entry(channel.clone()).or_insert_with(|| {
             should_start_indexing = true;
             Mutex::new(())
         });
 
-        let _ = globals.channel_mutex_map.read().unwrap().get(channel.as_str()).unwrap().lock();
+        let _ = CHANNEL_MUTEX_MAP.read().unwrap().get(channel.as_str()).unwrap().lock();
 
         let mut f = web::block(|| std::fs::File::create(filepath)).await.unwrap();
         while let Some(chunk) = field.next().await {
@@ -104,9 +104,9 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
 
     if should_start_indexing {
         let channel_clone = channel.clone();
-        let _ = web::block::<_, (), ()>(move || {
+        thread::spawn(move || {
             loop {
-                let _guard = globals.channel_mutex_map.read().unwrap().get(&channel_clone).unwrap();
+                let _guard = CHANNEL_MUTEX_MAP.read().unwrap().get(&channel_clone).unwrap();
                 let _ = Command::new("conda")
                     .arg("index")
                     .arg(&dirpath)
@@ -116,7 +116,7 @@ async fn upload(globals: web::Data<Globals>, info: web::Path<(String,String)>, m
                     .map(|mut p| {
                         let _ = p.wait();
                     });
-                thread::sleep(time::Duration::from_secs(globals.config.index_sleep_time));
+                thread::sleep(time::Duration::from_secs(config.index_sleep_time));
             }
         });
     }
@@ -178,10 +178,7 @@ index_sleep_time = 10
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
-            .data(Globals {
-                config: config_clone.clone(),
-                channel_mutex_map: RwLock::new(HashMap::new())
-            })
+            .data(config_clone.clone())
             .service(
                 web::resource("/")
                     .route(web::get().to(index)))
