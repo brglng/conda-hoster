@@ -55,7 +55,7 @@
       {% if channels.len() > 0 %}
         <ul>
           {% for channel in channels %}
-            <li><a href="{{ channel }}/"></a></li>
+            <li><a href="{{ channel.as_str() }}/"></a></li>
           {% endfor %}
         </ul>
       {% else %}
@@ -64,4 +64,5 @@
     </p>
   </body>
 </html>
-<!-- vim: sw=2 sts=2 et -->
+<!-- vim: sw=2 sts=2 et
+-->
