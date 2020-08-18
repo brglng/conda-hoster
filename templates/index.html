@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Conda Hoster</title>
+    <style>
+      body {
+        font-family: sans-serif;
+      }
+      hr {
+        margin-top: 40px;
+        margin-bottom: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <p>
+      <p>Usage:</p>
+      <ul>
+        <li>In Conda:
+          <p></p>
+          <ul>
+            <li>
+              Add channels as custom channels in Conda's configuration file according to <a href="https://docs.conda.io/projects/conda/en/latest/configuration.html">Conda configuration</a>
+            </li>
+            <li>
+              URL is <u>http://&lt;url-or-this-page&gt;/&lt;channel&gt;/</u>
+            </li>
+          </ul>
+        </li>
+        <p></p>
+        <p></p>
+        <li>Uploading:
+          <p></p>
+          <ul>
+            <li>
+              URL is <u>http://&lt;url-of-this-page&gt;/t/&lt;token&gt;/&lt;channel&gt;/&lt;arch&gt;/</u>
+            </li>
+            <li>
+              Content-Type is multipart/form-data
+            </li>
+            <li>
+              <em>token</em> is one of the tokens in the configuration file.
+            </li>
+            <li>
+              <em>arch</em> is one of linux-64, linux-32, osx-64, win-64 and win-32, according to <a href="https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/create-custom-channels.html">Creating custom channels</a>.
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </p>
+    <hr>
+    </p>
+      <p>Available Channels:</p>
+      {% if channels.len() > 0 %}
+        <ul>
+          {% for channel in channels %}
+            <li><a href="{{ channel }}/"></a></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <ul><li>There is no available channel yet.</li></ul>
+      {% endif %}
+    </p>
+  </body>
+</html>
+<!-- vim: sw=2 sts=2 et -->

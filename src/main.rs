@@ -14,9 +14,16 @@ use env_logger::Env;
 use futures::{StreamExt, TryStreamExt};
 use lazy_static::lazy_static;
 use serde_derive::Deserialize;
+use askama::Template;
 
 lazy_static! {
     static ref CHANNEL_MUTEX_MAP: RwLock<HashMap<String, Mutex<()>>> = RwLock::new(HashMap::new());
+}
+
+#[derive(Template)]
+#[template(path = "index.html")]
+struct IndexTemplate {
+    channels: Vec<String>
 }
 
 #[derive(Clone, Deserialize)]
@@ -28,25 +35,16 @@ struct Config {
 }
 
 async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
-    let mut html = String::from(r#"
-        <!DOCTYPE html>
-        <html>
-            <head>
-                <meta charset="utf-8">
-                <title>Conda Hoster</title>
-            </head>
-            <body>
-                <p>Available Channels:</p>
-    "#);
+    let mut channels = Vec::new();
     for entry in PathBuf::from(&config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
-                html.push_str(&format!("<p><a href=\"{0}/\">{0}</a></p>", entry.file_name().to_str().unwrap()));
+                channels.push(entry.file_name().to_str().unwrap().to_owned());
             }
         });
     }
-    html.push_str("</body>\n</html>\n");
-    return Ok(HttpResponse::Ok().header("Content-Type", "text/html; charset=utf-8").body(html));
+    let template = IndexTemplate { channels };
+    return Ok(HttpResponse::Ok().header("Content-Type", "text/html; charset=utf-8").body(template.render().unwrap()));
 }
 
 async fn channel_index(config: web::Data<Config>, info: web::Path<(String,)>) -> Result<NamedFile, Error> {
