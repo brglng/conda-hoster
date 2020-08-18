@@ -41,12 +41,10 @@ struct Config {
 
 async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     let mut channels = Vec::new();
-    for entry in PathBuf::from(&config.root).read_dir()? {
-        let _ = entry.map(|entry| {
-            if entry.path().is_dir() {
-                channels.push(entry.file_name().to_str().unwrap().to_owned());
-            }
-        });
+    for (_token, token_properties) in config.tokens.iter() {
+        for channel in token_properties.channels.iter() {
+            channels.push(channel.clone());
+        }
     }
     let template = IndexTemplate { channels };
     return Ok(HttpResponse::Ok().header("Content-Type", "text/html; charset=utf-8").body(template.render().unwrap()));
@@ -163,7 +161,8 @@ r#"bind = "0.0.0.0:8088"
 root = "{}/conda-hoster/web-root"
 index_sleep_time = 10
 
-[tokens]
+[tokens:abcdef0123456789]
+channels = ["my-awesome-channel"]
 "#, dirs::data_dir().unwrap().to_str().unwrap()))?;
     }
 
