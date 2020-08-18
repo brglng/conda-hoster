@@ -27,11 +27,16 @@ struct IndexTemplate {
 }
 
 #[derive(Clone, Deserialize)]
+struct TokenProperties {
+    channels: HashSet<String>
+}
+
+#[derive(Clone, Deserialize)]
 struct Config {
     bind: String,
     root: String,
     index_sleep_time: u64,
-    tokens: HashSet<String>
+    tokens: HashMap<String, TokenProperties>
 }
 
 async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
@@ -71,12 +76,12 @@ async fn channel(config: web::Data<Config>, req: HttpRequest) -> Result<NamedFil
 
 async fn upload(config: web::Data<Config>, info: web::Path<(String, String, String)>, mut payload: Multipart) -> Result<HttpResponse, Error> {
     let token = &info.0;
+    let channel = &info.1;
 
-    if config.tokens.get(token).is_none() {
+    if config.tokens.get(token).is_none() || config.tokens[token].channels.get(channel).is_none() {
         return Ok(HttpResponse::Forbidden().into());
     }
 
-    let channel = &info.1;
     let arch = &info.2;
     let dirpath = format!("{}/{}/{}", &config.root, channel, arch);
     let mut should_start_indexing = false;
@@ -154,7 +159,8 @@ async fn main() -> io::Result<()> {
 r#"bind = "0.0.0.0:8088"
 root = "{}/conda-hoster/web-root"
 index_sleep_time = 10
-tokens = []
+
+[tokens]
 "#, dirs::data_dir().unwrap().to_str().unwrap()))?;
     }
 
