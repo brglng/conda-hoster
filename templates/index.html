@@ -24,7 +24,7 @@
               Add channels as custom channels in Conda's configuration file according to <a href="https://docs.conda.io/projects/conda/en/latest/configuration.html">Conda configuration</a>
             </li>
             <li>
-              URL is <u>http://&lt;url-or-this-page&gt;/&lt;channel&gt;/</u>
+              URL is <u>http://&lt;url-of-this-page&gt;/&lt;channel&gt;/</u>
             </li>
           </ul>
         </li>
@@ -55,7 +55,7 @@
       {% if channels.len() > 0 %}
         <ul>
           {% for channel in channels %}
-            <li><a href="{{ channel.as_str() }}/"></a></li>
+            <li><a href="{{ channel }}/"></a></li>
           {% endfor %}
         </ul>
       {% else %}
