@@ -89,7 +89,10 @@ async fn upload(config: web::Data<Config>, info: web::Path<(String, String, Stri
         let content_disposition = field.content_disposition().unwrap();
 
         let mut filepath = PathBuf::from(&dirpath);
-        filepath.push(content_disposition.get_filename().unwrap().split("/").last().unwrap());
+        match content_disposition.get_filename() {
+            Some(filename) => filepath.push(filename.split("/").last().unwrap()),
+            None => return Ok(HttpResponse::BadRequest().into())
+        }
 
         // if already exists, return 409
         if filepath.exists() {
