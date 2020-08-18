@@ -39,9 +39,7 @@ async fn index(config: web::Data<Config>) -> Result<HttpResponse, Error> {
     for entry in PathBuf::from(&config.root).read_dir()? {
         let _ = entry.map(|entry| {
             if entry.path().is_dir() {
-                let channel = entry.file_name().to_str().unwrap().to_owned();
-                println!("channel: {}", &channel);
-                channels.push(channel);
+                channels.push(entry.file_name().to_str().unwrap().to_owned());
             }
         });
     }
