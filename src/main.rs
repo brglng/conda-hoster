@@ -197,6 +197,9 @@ channels = ["my-awesome-channel"]
                 web::resource("/")
                     .route(web::get().to(index)))
             .service(
+                web::resource("/index.html")
+                    .route(web::get().to(index)))
+            .service(
                 web::resource("/t/{token}/{channel}/{arch}/")
                     .route(web::post().to(upload)))
             .service(
